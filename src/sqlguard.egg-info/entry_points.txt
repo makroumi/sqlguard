@@ -1,0 +1,2 @@
+[console_scripts]
+sqlguard = sqlguard.cli:main

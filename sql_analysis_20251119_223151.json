@@ -1,0 +1,10 @@
+[
+  {
+    "issue":"SELECT * Usage",
+    "query":"SELECT * FROM users",
+    "fix":"Specify only needed columns",
+    "impact":"50-90% less data transfer, enables covering indexes",
+    "severity":"medium",
+    "count":1
+  }
+]

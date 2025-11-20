@@ -1,0 +1,14 @@
+LICENSE
+README.md
+setup.py
+src/sqlguard/__init__.py
+src/sqlguard.egg-info/PKG-INFO
+src/sqlguard.egg-info/SOURCES.txt
+src/sqlguard.egg-info/dependency_links.txt
+src/sqlguard.egg-info/entry_points.txt
+src/sqlguard.egg-info/not-zip-safe
+src/sqlguard.egg-info/requires.txt
+src/sqlguard.egg-info/top_level.txt
+src/sqlguard/core/__init__.py
+src/sqlguard/core/analyzer.py
+src/sqlguard/core/detector.py
