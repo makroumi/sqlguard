@@ -156,12 +156,12 @@ def run(
             fmt_lower = fmt.lower()
             try:
                 if fmt_lower == "html":
-                    filename = out_dir / f"sqlguard_report_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.html"
+                    filename = out_dir / f"slowql_report_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.html"
                     formatter.export_html_report(results_df, filename=str(filename))
                     console.print(f"[bold green]Exported HTML report:[/] {filename}")
                 else:
                     filename = analyzer.export_report(results_df, format=fmt_lower,
-                                                      filename=str(out_dir / f"sqlguard_results_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.{fmt_lower}"))
+                                                      filename=str(out_dir / f"slowql_results_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.{fmt_lower}"))
                     console.print(f"[bold green]Exported {fmt_lower}:[/] {filename}")
             except Exception as e:
                 console.print(f"[bold red]Failed to export {fmt}:[/] {e}")
