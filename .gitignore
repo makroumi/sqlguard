@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.coverage
+*.egg-info/
+sql_analysis_*.json
+.pytest_cache/
