@@ -1,46 +1,199 @@
 # src/sqlguard/cli.py
+import argparse
+from pathlib import Path
+from typing import List, Optional
+import sys
+import pandas as pd
 from rich.console import Console
-from rich.panel import Panel
-from rich import box
 
 from sqlguard.effects.animations import MatrixRain, CyberpunkSQLEditor, AnimatedAnalyzer
 from sqlguard.core.analyzer import QueryAnalyzer
 from sqlguard.formatters.console import ConsoleFormatter
 
+console = Console()
 
-def main():
-    console = Console()
+def sql_split_statements(sql: str) -> List[str]:
+    if not sql:
+        return []
+    parts = []
+    cur = []
+    in_squote = False
+    in_dquote = False
+    escape = False
+    for ch in sql:
+        if ch == "\\" and not escape:
+            escape = True
+            cur.append(ch)
+            continue
+        if ch == "'" and not escape and not in_dquote:
+            in_squote = not in_squote
+        elif ch == '"' and not escape and not in_squote:
+            in_dquote = not in_dquote
+        if ch == ";" and not in_squote and not in_dquote:
+            stmt = "".join(cur).strip()
+            if stmt:
+                parts.append(stmt)
+            cur = []
+        else:
+            cur.append(ch)
+        escape = False
+    trailing = "".join(cur).strip()
+    if trailing:
+        parts.append(trailing)
+    return parts
 
-    # 1) Intro animation (fast, no ceremony)
+def ensure_reports_dir(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+def run(
+    intro_enabled: bool = True,
+    intro_duration: float = 3.0,
+    mode: str = "auto",
+    input_file: Optional[Path] = None,
+    export_formats: Optional[List[str]] = None,
+    out_dir: Optional[Path] = None,
+    fast: bool = False,
+    verbose: bool = False,
+    non_interactive: bool = False
+) -> None:
+    # Decide interactive default: if TTY and mode auto -> compose (full UI)
+    is_tty = sys.stdin.isatty() and sys.stdout.isatty()
+    chosen_mode = mode
+    if mode == "auto":
+        chosen_mode = "compose" if is_tty and not non_interactive and input_file is None else "paste"
+
+    # 1) Intro (full cinematic unless fast or disabled)
     try:
-        matrix = MatrixRain()
-        matrix.run(duration=3)
+        if intro_enabled and not fast:
+            MatrixRain().run(duration=intro_duration)
+        elif intro_enabled and fast:
+            MatrixRain().run(duration=0.9)
     except Exception:
-        # Fail silently if terminal doesn't support full animation
         pass
 
-    # 2) Capture queries via editor
-    editor = CyberpunkSQLEditor()
-    queries_text = editor.get_queries()
-    if not queries_text or not queries_text.strip():
-        console.print("[bold yellow]No queries entered. Exiting.[/]")
-        return
+    # 2) Input selection
+    sql_payload = ""
+    if input_file:
+        sql_payload = input_file.read_text(encoding="utf-8")
+        if not sql_payload.strip():
+            console.print("[bold yellow]Input file is empty. Exiting.[/]")
+            return
+    else:
+        if chosen_mode == "compose" and not non_interactive:
+            # Use your full interactive editor (keeps the UI animation and previews)
+            editor = CyberpunkSQLEditor()
+            sql_payload = editor.get_queries() or ""
+            if not sql_payload.strip():
+                console.print("[bold yellow]No queries entered. Exiting.[/]")
+                return
+        else:
+            if non_interactive:
+                console.print("[bold yellow]Non-interactive mode: expecting input via --input-file or piped stdin[/]")
+                return
+            console.print("[bold cyan]Paste your SQL statements. End input with Ctrl+D (EOF) or two blank lines.[/]")
+            lines = []
+            try:
+                while True:
+                    line = input()
+                    if not line and lines and not lines[-1]:
+                        break
+                    lines.append(line)
+            except EOFError:
+                pass
+            sql_payload = "\n".join(lines).strip()
+            if not sql_payload:
+                console.print("[bold yellow]No SQL provided. Exiting.[/]")
+                return
 
-    # 3) Analyze
-    analyzer = QueryAnalyzer(verbose=False)
-    results_df = analyzer.analyze(queries_text, return_dataframe=True)
+    # 3) Split into statements robustly
+    statements = sql_split_statements(sql_payload)
 
-    # 4) Render vaporwave report
+    # 4) Animated analysis: particle loading (full) then glitch wipe
+    aa = AnimatedAnalyzer()
+    try:
+        if not fast:
+            aa.particle_loading("ANALYZING QUERIES")
+            aa.glitch_transition(duration=0.25)
+        else:
+            aa.glitch_transition(duration=0.08)
+    except Exception:
+        pass
+
+    # 5) Run analyzer
+    analyzer = QueryAnalyzer(verbose=verbose)
+    results_df = analyzer.analyze(statements, return_dataframe=True)
+
+    # 6) Render formatted report with ConsoleFormatter
     formatter = ConsoleFormatter()
+    # Ensure full reveal: use animated reveal_section around key formatter sections if desired
     formatter.format_analysis(results_df, title="SQLGuard Analysis")
 
-    # 5) Optional animated “analysis complete” flourish
+    # 7) Show expandable detailed analysis with the AnimatedAnalyzer wrapper
     try:
-        aa = AnimatedAnalyzer()
-        aa.glitch_transition(0.25)
+        # Create brief summary and detailed text for animated expansion (leveraging existing formatter outputs)
+        summary = f"[bold cyan]◆ ANALYSIS COMPLETE ◆[/]\n\n[green]✓[/] {results_df['count'].sum() if 'count' in results_df else len(results_df)} issues detected"
+        details_lines = []
+        if not results_df.empty:
+            for _, row in results_df.iterrows():
+                details_lines.append(f"{row['issue']} [{row.get('count',1)}] - {row['impact']}")
+        details = "\n".join(details_lines) or "[dim]No details available[/]"
+        aa.show_expandable_details(summary, details, expanded=False)
     except Exception:
         pass
 
+    # 8) Export if requested
+    if export_formats:
+        out_dir = Path(out_dir) if out_dir else Path.cwd() / "reports"
+        ensure_reports_dir(out_dir)
+        for fmt in export_formats:
+            fmt_lower = fmt.lower()
+            try:
+                if fmt_lower == "html":
+                    filename = out_dir / f"sqlguard_report_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.html"
+                    formatter.export_html_report(results_df, filename=str(filename))
+                    console.print(f"[bold green]Exported HTML report:[/] {filename}")
+                else:
+                    filename = analyzer.export_report(results_df, format=fmt_lower,
+                                                      filename=str(out_dir / f"sqlguard_results_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.{fmt_lower}"))
+                    console.print(f"[bold green]Exported {fmt_lower}:[/] {filename}")
+            except Exception as e:
+                console.print(f"[bold red]Failed to export {fmt}:[/] {e}")
+
+    # 9) Final flourish (full glitch)
+    try:
+        if not fast:
+            aa.glitch_transition(duration=0.35)
+    except Exception:
+        pass
+
+def build_argparser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="sqlguard", description="SQLGuard CLI — cyberpunk SQL static analyzer")
+    p.add_argument("--no-intro", dest="no_intro", action="store_true", help="Skip intro animation")
+    p.add_argument("--fast", action="store_true", help="Fast mode: reduce animations and blocking prompts")
+    p.add_argument("--input-file", type=Path, help="Read SQL from file")
+    p.add_argument("--mode", choices=["auto", "paste", "compose"], default="auto", help="Editor mode (auto chooses compose on TTY)")
+    p.add_argument("--export", nargs="*", choices=["html", "csv", "json"], help="Export formats")
+    p.add_argument("--out", type=Path, default=Path.cwd() / "reports", help="Output directory for exports")
+    p.add_argument("--duration", type=float, default=3.0, help="Intro duration seconds")
+    p.add_argument("--verbose", action="store_true", help="Enable analyzer verbose output")
+    p.add_argument("--non-interactive", action="store_true", help="Non-interactive mode (CI)")
+    return p
+
+def main(argv: Optional[List[str]] = None) -> None:
+    parser = build_argparser()
+    args = parser.parse_args(argv)
+    run(
+        intro_enabled=not args.no_intro,
+        intro_duration=args.duration,
+        mode=args.mode,
+        input_file=args.input_file,
+        export_formats=args.export,
+        out_dir=args.out,
+        fast=args.fast,
+        verbose=args.verbose,
+        non_interactive=args.non_interactive
+    )
 
 if __name__ == "__main__":
     main()
